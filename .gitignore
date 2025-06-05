@@ -128,16 +128,16 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-./model/
-./save/
+model/
+save/
 
-./data/
-./detection_results/*
-./results_folder/*
-./test/*
-./train/*
-./objs/*
-./nohup.out
-./cursor/*
+data/
+detection_results/
+results_folder/
+test/
+train/
+objs/
+nohup.out
+.cursor/
 
 

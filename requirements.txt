@@ -1,0 +1,3 @@
+torchnet==0.0.2
+opencv-python
+kornia
