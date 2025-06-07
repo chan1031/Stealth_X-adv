@@ -57,22 +57,15 @@ parser.add_argument("--lambda_rpn", default=2.0, type=float,
 parser.add_argument("--weight_decay", default=0.1, type=float,
                     help="decay factor for loss weights over iterations")
 
+parser.add_argument("--use_clustering", default=True, type=bool,
+                    help="whether to use clustering-based shape attack")
+#클러스터링 거리 설정
+parser.add_argument("--cluster_distance", default=3.0, type=float,
+                    help="maximum distance for clustering (smaller = tighter clusters)")
+
 args = parser.parse_args()
 args.save_path = os.path.join(args.save_path, f"{args.dataset}/{args.pixel_material}", "FasterRCNN")
 
-
-def get_color_adjustment(category):
-    """
-    색상 범주에 따른 HSV 조정값 반환
-    """
-    adjustments = {
-        "original": {"s": 1.0, "v": 1.0},    # 기본 색상
-        "dark": {"s": 2.2, "v": 0.7},        # 진한 색상
-        "very_dark": {"s": 2.5, "v": 0.5},   # 매우 진한 색상
-        "light": {"s": 0.7, "v": 1.3},       # 얕은 색상
-        "very_light": {"s": 0.5, "v": 1.5}   # 매우 얕은 색상
-    }
-    return adjustments.get(category, adjustments["original"])
 
 #random attack
 def random_attack(images, bboxes, labels, net, trainer):
@@ -132,6 +125,7 @@ faster rcnn loss 함수
 '''
 
 #few pixel attack
+
 def attack(images, bboxes, labels, net, trainer):
     net.phase = "train"
     images = [e.cuda() for e in images]
@@ -156,10 +150,10 @@ def attack(images, bboxes, labels, net, trainer):
         base_color = base_color[0, :, 0, 0]  # (3,) 텐서로 변환
         
         # bbox 영역만 추출하여 해당 부분만 변화하게 설정
-        bbox_region = images[i][:, y1:y2+1, x1:x2+1].clone()
-        bbox_region.requires_grad_(True)
+        bbox_region = images[i][:, y1:y2+1, x1:x2+1].clone() #bbox 영역만 추출
+        bbox_region.requires_grad_(True) #bbox 영역에 대한 그라디언트 계산 활성화
         
-        #원본 이미지
+        #원본 이미지 (detach하지 않고 유지)
         images[i] = images[i].clone().detach()
 
         # 반복 횟수 설정
@@ -168,13 +162,17 @@ def attack(images, bboxes, labels, net, trainer):
             current_lambda_roi = args.lambda_roi * (1.0 - args.weight_decay * iter / args.num_iters)
             current_lambda_rpn = args.lambda_rpn * (1.0 - args.weight_decay * iter / args.num_iters)
             
-            #이미지에 대한 그라디언트 초기화
+            #bbox 영역에 대한 그라디언트 초기화
             if bbox_region.grad is not None:
                 bbox_region.grad.zero_()
             trainer.reset_meters()
 
-            #이미지에 대한 손실함수 계산
-            loss_cls = trainer.forward(images[i].unsqueeze(0), bboxes[i].unsqueeze(0), labels[i].unsqueeze(0), 1.0) #이미지를 모델에 넣어서 손실값을 획득
+            # *** 핵심: bbox 영역을 이미지에 반영한 후 모델에 전달 ***
+            current_image = images[i].clone()
+            current_image[:, y1:y2+1, x1:x2+1] = bbox_region
+
+            #이미지에 대한 손실함수 계산 (bbox_region이 포함된 current_image 사용)
+            loss_cls = trainer.forward(current_image.unsqueeze(0), bboxes[i].unsqueeze(0), labels[i].unsqueeze(0), 1.0)
             #공격을 위한 손실함수 정의 (roi_cls_loss와 rpn_cls_loss를 가중치를 줘서 공격)
             L_attack = (current_lambda_roi * loss_cls.roi_cls_loss + 
                        current_lambda_rpn * loss_cls.rpn_cls_loss)
@@ -182,49 +180,47 @@ def attack(images, bboxes, labels, net, trainer):
             #적대적 공격이므로 부호를 반대화
             loss_adv = -L_attack
             
-            #기울기를 계산해서 image 픽셀에 대한 기울기 값을 계산한다.
+            #기울기를 계산해서 bbox_region 픽셀에 대한 기울기 값을 계산한다.
             loss_adv.backward()
             
-            #기울기 값이 존재한다면 공격진행 ㄱ
-            if images[i].grad is not None and images[i].grad.abs().sum() > 0:
-                #이미지 전체 픽셀의 기울기 값을 가져옴. 단, 절대값을 넣어서 크기만을 가져옴
-                grad = images[i].grad.abs()
+            #bbox_region의 기울기 값이 존재한다면 공격진행
+            if bbox_region.grad is not None and bbox_region.grad.abs().sum() > 0:
+                #bbox 영역 픽셀의 기울기 값을 가져옴. 단, 절대값을 넣어서 크기만을 가져옴
+                grad = bbox_region.grad.abs()
                 #RGB전체 3채널의 기울기 값을 더해서 하나의 픽셀에 대한 기울기 값을 계산
                 grad_magnitude = grad.sum(dim=0)
                 
-                #이미지와 같은 크기의 0으로 채워진 텐서 생성
-                grad_magnitude_bbox = torch.zeros_like(grad_magnitude)
-                #핵심 bbox영역만 복사
-                grad_magnitude_bbox[y1:y2+1, x1:x2+1] = grad_magnitude[y1:y2+1, x1:x2+1]
-                #1차원으로 변환
-                flat_grad = grad_magnitude_bbox.view(-1)
+                #1차원으로 변환 (bbox 영역 크기)
+                flat_grad = grad_magnitude.view(-1)
                 
                 #기울기 값이 존재한다면 공격진행
                 if flat_grad.max() > 0:
                     # 전체 반복에서 n_pixels개의 픽셀만 선택
                     if iter == 0:  # 첫 번째 반복에서만 픽셀 선택
                         _, indices = torch.topk(flat_grad, min(args.n_pixels, flat_grad.numel()))
-                        selected_y = indices // current_w
-                        selected_x = indices % current_w
+                        # bbox_region의 실제 크기 사용
+                        bbox_h, bbox_w = bbox_region.shape[1], bbox_region.shape[2]
+                        selected_y = indices // bbox_w  # bbox 내부의 상대적 y 좌표
+                        selected_x = indices % bbox_w   # bbox 내부의 상대적 x 좌표
                         selected_pixels = list(zip(selected_y, selected_x))
                     
                     # 선택된 픽셀들만 변형
                     for y, x in selected_pixels:
-                        #이미지 3 채널 (R,G,B)에 대한 기울기 값을 가져옴
-                        pixel_grad = images[i].grad[:, y, x]
+                        #bbox 영역 3 채널 (R,G,B)에 대한 기울기 값을 가져옴
+                        pixel_grad = bbox_region.grad[:, y, x]
                         #기울기 값의 부호를 가져옴
                         grad_direction = torch.sign(pixel_grad)
                         #기울기 값의 크기를 조정
-                        brightness_adjustment = 1.0 - args.lr * grad_direction.mean() #이미 부호를 바꾸었으므로 기울기의 반대방향으로 계산이 된다.
+                        brightness_adjustment = 1.0 - args.lr * grad_direction.mean()
                         #밝기 조정을 50~150%로 유지
                         brightness_adjustment = torch.clamp(brightness_adjustment, 0.5, 1.5)
                         #밝기 적용, 기본 색상에 밝기 조정 값을 곱해서 새로운 색상 생성
                         adjusted_color = base_color * brightness_adjustment
                         adjusted_color = torch.clamp(adjusted_color, 0.0, 1.0)
                          
-                        #이미지에 적용     
+                        #bbox 영역에 적용     
                         with torch.no_grad():
-                            images[i][:, y, x] = adjusted_color
+                            bbox_region[:, y, x] = adjusted_color
                 
                 print(f"Iteration {iter+1}/{args.num_iters}, Loss: {loss_adv.item():.4f}, "
                       f"ROI Cls: {loss_cls.roi_cls_loss.item():.4f} (w={current_lambda_roi:.2f}), "
@@ -232,6 +228,10 @@ def attack(images, bboxes, labels, net, trainer):
             else:
                 print(f"Iteration {iter+1}/{args.num_iters}: No gradients computed or zero gradients")
                 break
+
+            # *** 최종 이미지 업데이트 (bbox 영역을 원본에 반영) ***
+            with torch.no_grad():
+                images[i][:, y1:y2+1, x1:x2+1] = bbox_region.detach()
 
             # === 탐지 여부 확인 ===
             img_np = images[i].detach().cpu().numpy()

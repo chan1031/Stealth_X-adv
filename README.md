@@ -1,12 +1,46 @@
-# X-Adv:  Physical Adversarial Object Attacks against X-ray Prohibited Item Detection
-
-![](./assets/framework.jpg)
+# Stealth X-Adv:  Stealth Physical Adversarial Object Attacks against X-ray Prohibited Item Detection [On Progress]
 
 ## Introduction
+Stealth X-ADV is a Adversarial Object for attack X-ray Object Detector [Faster-RCNN, SSD].  
+The existing adversarial attack technique for X-ray object detectors, known as X-ADV (https://github.com/DIG-Beihang/X-adv), has demonstrated effective performance in X-ray environments. However, the generated objects are highly conspicuous, making them easily noticeable in real-world settings, which increases the risk of being detected by security personnel in advance. Therefore, this study aims to enhance the stealthiness of the original X-ADV method.  
+To achieve this, we introduce two approaches: **(1) Key-ADV** and **(2) Few-Pixel Attack in X-ray**.
+(1) Key-ADV showed a 0.2 reduction in mAP, demonstrating a performance drop similar to the original X-ADV, while achieving even better stealth performance.
 
-This repository is the official PyTorch implemetation of paper "[X-Adv: Physical Adversarial Object Attacks against X-ray Prohibited Item Detection](https://arxiv.org/abs/2302.09491)".
 
-**XAD download link: please go to [this website](https://github.com/DIG-Beihang/XrayDetection/) to acquire download link.**
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/209f459b-1208-4c74-a096-b590a74088e2" width="400" />
+</div>
+<div align="center">
+  (As can be seen, the original X-ADV generates objects with suspicious shapes.)
+</div>  
+
+## Methodology  
+### 1) Key-ADV: 'Key' but 'Adversarial'
+
+<div align="center">
+
+| Faste-RCNN (OPIXray)| Normal |Key X-ADV (Ours) | X-ADV |  
+|----------|----------|----------|----------|
+| TP   |  1407    |   1173   |    1144  | 
+| FP    |   373   |   843   |    621  |
+| mAP    |   0.73   |   0.53   |    0.53  | 
+
+</div>  
+
+We conducted an attack by subtly adjusting the perceptual loss function to embed adversarial patterns into the grooves of a "key"—a common and inconspicuous item in luggage.  
+As you can see 'Key-ADV' shows a comparable mAP (0.53) reduction to the original X-ADV, but offers the additional advantage of being able to deceive not only object detectors but also the human eye.  
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/24f229a8-7f86-40e7-9377-d1e5dec598d5" width="500" />
+  <img src="https://github.com/user-attachments/assets/7ef2a67e-14cd-4508-87ca-34c9be814676" width="500" />
+</div>
+
+### 2) Few-Pixel Attack (On progress) 
+Although Key-ADV demonstrated strong attack performance, it is limited in terms of applicable object types and poses challenges for 3D printing. Therefore, we aim to apply the existing Few-Pixel Attack as an alternative approach.
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/25b20944-0d4e-4e5a-bbd9-a203e0bbc370" width="600" />
+</div>
+In this study, we apply the Few-Pixel Attack to disrupt the detection of illegal luggage items, ensuring that the altered pixels are grouped together in a compact region. These pixels are then arranged into a specific pattern, allowing the attack to be embedded into ordinary luggage items for practical deployment.
 
 ## Install
 
@@ -21,10 +55,6 @@ pip install -r requirements.txt
 ```
 
 ### Data Preparation
-
-#### XAD
-
-The XAD dataset will be released after accepted.
 
 #### OPIXray & HiXray
 
@@ -125,25 +155,3 @@ python test_frcnn.py --dataset OPIXray/HiXray/XAD \
     --phase path/to/your/adver_image
 ```
 
-## Citation
-
-If this work helps your research, please cite the following paper.
-
-```
-@inproceedings{liu2023xadv,
-  title={X-Adv: Physical Adversarial Object Attacks against X-ray Prohibited Item Detection},
-  author={Liu, Aishan and Guo, Jun and Wang, Jiakai and Liang, Siyuan and Tao, Renshuai and Zhou, Wenbo and Liu, Cong and Liu, Xianglong and Tao, Dacheng},
-  booktitle={32st USENIX Security Symposium (USENIX Security 23)},
-  year={2022}
-}
-```
-
-## Reference
-
-[Original implementation and pre-trained weight of SSD](https://github.com/amdegroot/ssd.pytorch)
-
-[Implementation and pre-trained weight of Faster R-CNN](https://github.com/chenyuntc/simple-faster-rcnn-pytorch)
-
-[Official repository of DOAM and OPIXray](https://github.com/DIG-Beihang/OPIXray)
-
-[Official repository of LIM and HiXray](https://github.com/HiXray-author/HiXray)
